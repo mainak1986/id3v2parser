@@ -1,5 +1,21 @@
 /*
- * id3v2parser - program to parse ID3v2.4 tags
+ *  id3v2parser - program to parse ID3v2.4 tags
+ *
+ * 	This program can read ID3 tags but only in version 2.4, according to the
+ * 	latest specification. There were some troubles with version 2.3, so it
+ * 	has not been implemented.
+ *
+ * 	Parser is able to parse following types of data:
+ * 	  - textual information,
+ * 	  - unsychronized lyrics,
+ * 	  - pictures within tag.
+ * 	Other frames which are not parsed, are skipped. In the program's output
+ * 	you can see four-char frame IDs.
+ *
+ *  How to build: 'gcc -std=c11 -Wall -Wextra id3v2parser.c -o id3v2parser'
+ *
+ *  How to run: './id3v2parser mp3_file_to_parse.mp3'
+ *
  *
  *  Copyright (c) 2014 - Martin Rabek
  *  All rights reserved.
@@ -37,13 +53,11 @@
 #include "id3v2parser.h"
 
 
-/**
- *
- */
+/** Structure for textual information */
 static struct id3v2_frame_textinfo_s {
-	char *id;
-	char *info;
-	char *text;
+	char *id;				/**< frame ID code */
+	char *info;				/**< text corresponding to the frame ID code */
+	char *text;				/**< text from the frame body */
 } id3v2_textinfo[] = {
     {"TIT1", 	"Content group:     ", 	NULL},
     {"TIT2", 	"Title:             ", 	NULL},
@@ -95,105 +109,84 @@ static struct id3v2_frame_textinfo_s {
     {"TSOP", 	"Performer sort:    ",  NULL},
     {"TSOT", 	"Title sort:        ",  NULL},
 
-    {NULL, 		NULL, 					NULL},
+    {NULL, 		NULL, 					NULL}
 };
 
-/**
- *
- */
+/** Structure for lyrics information */
 static struct id3frame_other_info_s {
-	char *lang;
-	char *descr;
-	char *text;
+	char *lang;				/**< language of the lyrics */
+	char *descr;			/**< description of the lyrics */
+	char *text;				/**< lyrics text */
 } id3v2_lyrics = {NULL, NULL, NULL};
 
-/**
- *
- */
+/** Structure for pictures information */
 static struct id3frame_apic_type_s {
-	uint8_t type;
-	char *text;
-	char *mime;
-	char *descr;
-	char *data;
-	uint16_t flags;
+	uint8_t type;			/**< type of the image */
+	char *text;				/**< text corresponding to the type */
+	char *mime;				/**< mime type of the image */
+	char *descr;			/**< description of the image */
+	unsigned char *data;	/**< binary data of the image */
+	uint8_t flags;			/**< flags of the frame header */
+	uint32_t len;			/**< length of store binary data */
 } id3frame_apic_type[] = {
-	{0x00, "other", 				NULL, NULL, NULL, 0},
-	{0x01, "file icon", 			NULL, NULL, NULL, 0},
-	{0x02, "other file icon", 		NULL, NULL, NULL, 0},
-	{0x03, "cover front", 			NULL, NULL, NULL, 0},
-	{0x04, "cover back", 			NULL, NULL, NULL, 0},
-	{0x05, "leaflet page", 			NULL, NULL, NULL, 0},
-	{0x06, "media", 				NULL, NULL, NULL, 0},
-	{0x07, "soloist", 				NULL, NULL, NULL, 0},
-	{0x08, "artist", 				NULL, NULL, NULL, 0},
-	{0x09, "conductor", 			NULL, NULL, NULL, 0},
-	{0x0A, "band", 					NULL, NULL, NULL, 0},
-	{0x0B, "composer", 				NULL, NULL, NULL, 0},
-	{0x0C, "lyricist", 				NULL, NULL, NULL, 0},
-	{0x0D, "recording location", 	NULL, NULL, NULL, 0},
-	{0x0E, "during recording", 		NULL, NULL, NULL, 0},
-	{0x0F, "during performance", 	NULL, NULL, NULL, 0},
-	{0x10, "movie screen capture", 	NULL, NULL, NULL, 0},
-	{0x11, "bright coloured fish", 	NULL, NULL, NULL, 0},
-	{0x12, "illustration", 			NULL, NULL, NULL, 0},
-	{0x13, "band logotype", 		NULL, NULL, NULL, 0},
-	{0x14, "publisher", 			NULL, NULL, NULL, 0},
+	{0x00, "other", 				NULL, NULL, NULL, 0, 0},
+	{0x01, "file icon", 			NULL, NULL, NULL, 0, 0},
+	{0x02, "other file icon", 		NULL, NULL, NULL, 0, 0},
+	{0x03, "cover front", 			NULL, NULL, NULL, 0, 0},
+	{0x04, "cover back", 			NULL, NULL, NULL, 0, 0},
+	{0x05, "leaflet page", 			NULL, NULL, NULL, 0, 0},
+	{0x06, "media", 				NULL, NULL, NULL, 0, 0},
+	{0x07, "soloist", 				NULL, NULL, NULL, 0, 0},
+	{0x08, "artist", 				NULL, NULL, NULL, 0, 0},
+	{0x09, "conductor", 			NULL, NULL, NULL, 0, 0},
+	{0x0A, "band", 					NULL, NULL, NULL, 0, 0},
+	{0x0B, "composer", 				NULL, NULL, NULL, 0, 0},
+	{0x0C, "lyricist", 				NULL, NULL, NULL, 0, 0},
+	{0x0D, "recording location", 	NULL, NULL, NULL, 0, 0},
+	{0x0E, "during recording", 		NULL, NULL, NULL, 0, 0},
+	{0x0F, "during performance", 	NULL, NULL, NULL, 0, 0},
+	{0x10, "movie screen capture", 	NULL, NULL, NULL, 0, 0},
+	{0x11, "bright coloured fish", 	NULL, NULL, NULL, 0, 0},
+	{0x12, "illustration", 			NULL, NULL, NULL, 0, 0},
+	{0x13, "band logotype", 		NULL, NULL, NULL, 0, 0},
+	{0x14, "publisher", 			NULL, NULL, NULL, 0, 0},
 
-	{0xff, "image", 				NULL, NULL, NULL, 0} // default value - not in specification
+	{0xff, NULL, 					NULL, NULL, NULL, 0, 0}
 };
 
 
-
-/* Main function - run program as './id3v2parser mp3_file_to_parse.mp3' */
 int main(int argc, char *argv[]) {
 	unsigned char *buffer;
 	uint32_t buffer_len;
-	uint16_t i;
 
 	/* Program receives as its first argument name of the MP3 file */
 	if(argc != 2)  {
-		fprintf(stderr, "Wrong number of arguments - run program as '%s file.mp3'\n", argv[0]);
+		fprintf(stderr, "Wrong number of arguments - run program as '%s file.mp3'!\n", argv[0]);
 		return 1;
 	}
 
 	/* Read file and store binary data in the buffer */
 	if(read_file(argv[1], &buffer, &buffer_len) == 1) {
-		fprintf(stderr, "Problem while reading MP3 file %s has appeared\n", argv[1]);
+		fprintf(stderr, "Error while reading MP3 file %s has appeared!\n", argv[1]);
 		return 1;
 	}
 
 	/* Parse input file */
-	if(parse_buffer(buffer, buffer_len) == 0) {
-		/* Print info */
-		printf("Textual information:\n");
-		for(i=0; id3v2_textinfo[i].id; i++) {
-			if(id3v2_textinfo[i].text){
-				printf("%s %s\n", id3v2_textinfo[i].info, id3v2_textinfo[i].text);
-			}
-		}
-		for(i=0; i < sizeof(id3frame_apic_type); i++) {
-			if(id3frame_apic_type[i].data){
-				printf("Picture:\n\t%s\n", id3frame_apic_type[i].mime);
-				if(id3frame_apic_type[i].descr) {
-					printf("\tdescription: %s\n", id3frame_apic_type[i].descr);
-				}
-				//TODO print into file
-			}
-		}
-		if(id3v2_lyrics.text) {
-			printf("----\nLyrics (language %s):\n%s\n----\n", id3v2_lyrics.lang, id3v2_lyrics.text);
-		}
+	if(parse_buffer(buffer, buffer_len) != 0) {
+		fprintf(stderr, "Error while parsing input buffer occurred!\n");
+		deallocate_memory(buffer); /* Free dynamically allocated memory */
+		return 1;
+	}
+
+	/* Write parsed data into file(s) */
+	if(write_parsed_data(argv[1]) != 0) {
+		fprintf(stderr, "Error while writing parsed data into file(s) occurred!\n");
+		deallocate_memory(buffer); /* Free dynamically allocated memory */
+		return 1;
 	}
 
 	/* Free dynamically allocated memory */
-	free(buffer);
-
-	for(i=0; id3v2_textinfo[i].id; i++) {
-		if(id3v2_textinfo[i].text){
-			free(id3v2_textinfo[i].text);
-		}
-	}
+	deallocate_memory(buffer);
 
 	return 0;
 }
@@ -201,22 +194,20 @@ int main(int argc, char *argv[]) {
 
 int read_file(char * name, unsigned char ** p_buffer, uint32_t * p_len) {
 	FILE *file;
-	size_t result;
 
-
-	// Open file in read binary mode
+	/* Open file in read binary mode */
 	file = fopen(name, "rb");
 	if (file == NULL) {
 		fprintf(stderr, "Error while opening file %s!\n", name);
 		return 1;
 	}
 
-	// Find out length of the file
+	/* Find out length of the file */
 	fseek(file, 0, SEEK_END);
 	*p_len = ftell(file);
 	fseek(file, 0, SEEK_SET);
 
-	// Allocate memory for an input buffer
+	/* Allocate memory for an input buffer */
 	*p_buffer = (unsigned char *) malloc(*p_len);
 	if (*p_buffer == NULL)	{
 		fprintf(stderr, "Error while allocating memory for buffer!\n");
@@ -224,9 +215,8 @@ int read_file(char * name, unsigned char ** p_buffer, uint32_t * p_len) {
 		return 1;
 	}
 
-	//Read content of the file and store it into the buffer
-	result = fread(*p_buffer, 1, *p_len, file);
-	if(result != *p_len) {
+	/* Read content of the file and store it into the buffer */
+	if(fread(*p_buffer, 1, *p_len, file) != *p_len) {
 		fprintf(stderr, "Error while reading file!\n");
 		fclose(file);
 		return 1;
@@ -236,84 +226,64 @@ int read_file(char * name, unsigned char ** p_buffer, uint32_t * p_len) {
 	return 0;
 }
 
-/*
- *   +-----------------------------+
- *   |      Header (10 bytes)      |
- *   +-----------------------------+
- *   |       Extended Header       | - given by (header.flags & FLAG_ID3_EXTEND) bit
- *   | (variable length, OPTIONAL) |
- *   +-----------------------------+
- *   |   Frames (variable length)  |
- *   +-----------------------------+
- *   |           Padding           |
- *   | (variable length, OPTIONAL) |
- *   +-----------------------------+
- *   | Footer (10 bytes, OPTIONAL) | - given by (header.flags & FLAG_ID3_FOOTER) bit
- *   +-----------------------------+
- */
 
 int parse_buffer(unsigned char *buffer, uint32_t buffer_len) {
 	id3v2_header_t header;
 	unsigned char *p_buff = buffer;
-	int ret_code;
 
+	/* Validate that there are enough data in buffer to parse */
 	printf("MP3 file length: %u\n", buffer_len);
-
-	//Validate that there are enough data in buffer to parse
 	if(buffer_len < HEADER_LEN) {
 		fprintf(stderr, "Error - file is too small to include ID3 header (10 bytes)\n");
 		return 1;
 	}
 
-	//ID3 tag is supposed to be at the beginning of the MP3 file.
-	//In minor cases (I was not able to get an example) it can be elsewhere - but this has not been implemented.
-	//Process Header
-	ret_code = parse_id3v2_header(&p_buff, &header);
-	if(ret_code != 0) {
+	/* In this implementation, ID3 tag is supposed to be at the beginning of the MP3 file */
+	if(parse_id3v2_header(&p_buff, &header) == 1) {
+		fprintf(stderr, "Error - missing ID3 tag so it cannot be parsed\n");
 		return 1;
 	}
 
-	print_id3v2_header(header); //Enable
+	/* Print ID3 tag header information */
+	print_id3v2_header(header);
 
 	if(header.major_version != 4) {
 		fprintf(stderr, "Cannot process ID3v2.%u tag. Only parsing of ID3v2.4 is implemented!\n", header.major_version);
 		return 1;
 	}
 
-	//Process Extended Header (OPTIONAL)
+	/* Process Extended Header (OPTIONAL) */
 	if(header.flags & FLAG_ID3_EXTEND) {
-		// The extended header contains information that can provide further
-		// insight in the structure of the tag, but is not vital to the correct
-		// parsing of the tag information; hence the extended header is optional.
 		skip_id3v2_extended_header(&p_buff);
 	}
 
-	//Validate that there are enough data in buffer to parse
+	/* Validate that there are enough data in buffer to parse */
 	if(buffer_len < p_buff - buffer + header.size) {
 		fprintf(stderr, "Error - file is too small to include ID3 tag (probably corrupted), as derived from ID3 header\n");
 		return 1;
 	}
 
-	//Process Frames until size or Padding
+	/* Process frames until size or padding */
 	while((uint32_t) (p_buff - buffer) < header.size) {
 #ifdef DEBUG
 		printf("%u: ", (uint32_t) (p_buff - buffer));
 #endif
 		id3v2_frame_header_t frame_header;
 
-		// Process Frame header
-		ret_code = parse_id3v2_frame_header(&p_buff, &frame_header);
-		if(ret_code != 0) {
+		/* Process frame header */
+		if(parse_id3v2_frame_header(&p_buff, &frame_header) == 1) {
+			// Frame is empty but frame size is not over - padding is here
 			break;
 		}
-//#ifdef DEBUG
+
+		/* Print ID3 frame header information */
 		print_id3v2_frame_header(frame_header);
-//#endif
 
-		// Process Frame body
-		parse_id3v2_frame_body(&p_buff, frame_header);
-
-		//printf("size: %u, current: %u\n", header.size, p_buff - buffer);
+		/* Process frame body */
+		if(parse_id3v2_frame_body(&p_buff, frame_header) != 0) {
+			fprintf(stderr, "Error while parsing ID3 frame body of ID %s\n", frame_header.id);
+			return 1;
+		}
 	}
 
 	return 0;
@@ -354,15 +324,15 @@ int skip_id3v2_extended_header(unsigned char **p_header_buff) {
 	print_hexa(*p_header_buff, 6);
 #endif
 
-	// Parse size of the extended header
+	/* Parse size of the extended header */
 	memcpy(&tmp_size[0], *p_header_buff, 4);
 	*p_header_buff += 4;
 	size = ((tmp_size[0] & 0x7F) << 21) | ((tmp_size[1] & 0x7F) << 14) | ((tmp_size[2] & 0x7F) << 7) | (tmp_size[3] & 0x7F);
 
-	// Skip next 2 bytes of information
+	/* Skip next 2 bytes of information */
 	*p_header_buff += 2;
 
-	// Skip body of external header
+	/* Skip body of external header */
 	*p_header_buff += size;
 
 	return 0;
@@ -380,9 +350,7 @@ int parse_id3v2_frame_header(unsigned char **p_header_buff, id3v2_frame_header_t
 	snprintf((char*) header->id, 5, (char*) *p_header_buff);
 	*p_header_buff += 4;
 	if(header->id[0] == (unsigned char) 0x00) {
-		//printf("Seems that there is empty space:\n\t\t");
-		//print_hexa(*p_header_buff, 50);
-		// Frame is empty so the rest of ID3 tag does
+		/* Frame is empty so the rest of ID3 tag does */
 		return 1;
 	}
 
@@ -398,14 +366,13 @@ int parse_id3v2_frame_header(unsigned char **p_header_buff, id3v2_frame_header_t
 }
 
 
-
 int parse_id3v2_frame_body(unsigned char **p_header_buff, id3v2_frame_header_t header) {
 	uint32_t i;
 	uint32_t j;
 	uint8_t encoding;
-	uint8_t len;
-	char * text;
-	char * subtype;
+	uint32_t len;
+	uint8_t type;
+	uint8_t found;
 
 #ifdef DEBUG
 		printf("\t\t");
@@ -414,23 +381,24 @@ int parse_id3v2_frame_body(unsigned char **p_header_buff, id3v2_frame_header_t h
 
 	i = 0;
 
-	// Skip length info
+	/* Skip length info - not particularly useful for parsing */
 	if(header.flags & FLAG_FR_LEN) {
 		i += 4;
-		//memcpy(&tmp_size[0], *p_header_buff, 4);
-		//*p_header_buff += 4;
-		//uint32_t size = ((tmp_size[0] & 0x7F) << 21) | ((tmp_size[1] & 0x7F) << 14) | ((tmp_size[2] & 0x7F) << 7) | (tmp_size[3] & 0x7F);
-		//printf("Ext length: %u\n", size);
 	}
 
-	if(header.id[0] == 'T') { // Process 'Text information frame'
+	if(header.id[0] == 'T') { /* Process 'Text information frame' */
+		/* Select id3v2_textinfo[j] to store the parsed data */
 		for(j = 0; id3v2_textinfo[j].id; j++) {
 			if(strcmp(id3v2_textinfo[j].id, (char*) header.id) == 0) {
-				encoding = (uint8_t)*(*p_header_buff);
-				if(encoding == ENC_UTF_8 || encoding == ENC_ISO_8859_1) {	//UTF-8 encoding or ISO-8859-1
-					text = malloc(header.size);
-					snprintf(text, header.size, (char*) *p_header_buff+1);
-					id3v2_textinfo[j].text = text;
+				encoding = (uint8_t)*(*p_header_buff+i++);
+				if(encoding == ENC_UTF_8 || encoding == ENC_ISO_8859_1) { /* UTF-8 encoding or ISO-8859-1 */
+					id3v2_textinfo[j].text = malloc(header.size);
+
+					/* strncpy is preferred to use to snprintf because string read is not terminated by '\0' */
+					strncpy(id3v2_textinfo[j].text, (char*) *p_header_buff+i, header.size-1);
+					id3v2_textinfo[j].text[header.size-1] = '\0';
+
+					//len = snprintf(id3v2_textinfo[j].text, header.size, (char*) *p_header_buff+i);
 				}
 				else {
 					fprintf(stderr, "Decoding of encoding type %u is not supported (it is not typical to use it for ID3v2.4 tag)\n", encoding);
@@ -439,11 +407,11 @@ int parse_id3v2_frame_body(unsigned char **p_header_buff, id3v2_frame_header_t h
 			}
 		}
 	}
-	else if(strcmp((char *) header.id, "USLT") == 0) { // Process 'Unsynchronised lyrics'
+	else if(strcmp((char *) header.id, "USLT") == 0) { /* Process 'Unsynchronised lyrics' */
 		encoding = (uint8_t)*(*p_header_buff+i++);
 		if(encoding == ENC_UTF_8 || encoding == ENC_ISO_8859_1) {
 			id3v2_lyrics.lang = malloc(4);
-			snprintf((char*) id3v2_lyrics.lang, 4, (char*) *p_header_buff+i);
+			snprintf(id3v2_lyrics.lang, 4, (char*) *p_header_buff+i);
 			i += 3;
 
 			len = strlen((char *) *p_header_buff+i);
@@ -451,64 +419,43 @@ int parse_id3v2_frame_body(unsigned char **p_header_buff, id3v2_frame_header_t h
 			snprintf((char *) id3v2_lyrics.descr, len + 1, (char*) *p_header_buff+i);
 			i += len + 1;
 
-			text = malloc(header.size-i+1);
-			snprintf(text, header.size-i+1, (char*) *p_header_buff+i);
-
 			id3v2_lyrics.text = malloc(header.size-i+1);
-			snprintf((char *) id3v2_lyrics.text, header.size-i+1, (char*) *p_header_buff+i);
+			snprintf(id3v2_lyrics.text, header.size-i+1, (char*) *p_header_buff+i);
 		}
 		else {
 			fprintf(stderr, "Not able to decode USLT tag\n");
 		}
 	}
-	else if(strcmp((char *) header.id, "APIC") == 0) { // Process 'Attached picture'
+	else if(strcmp((char *) header.id, "APIC") == 0) { /* Process 'Attached picture' */
 		encoding = (uint8_t)*(*p_header_buff+i++);
-		//printf("Enc: %u\n", encoding);
 		len = strlen((char *) *p_header_buff+i);
-		char * mime = malloc(len + 1);
-		snprintf((char *) mime, len + 1, (char*) *p_header_buff+i);
-		i += len + 1;
-		//printf("MIME: %s\n", mime);
-		//Process MIME subtype - get the second
-		strtok_r (mime, "/", &subtype);
+		type = (uint8_t)*(*p_header_buff+i+len+1); /* Read 'type' first (is after mime) */
 
-		uint8_t type = (uint8_t)*(*p_header_buff+i++);
-		//printf("Type: %u\n", type);
-
-		for(j = 0; j < sizeof(id3frame_apic_type)-1; j++) {
+		/* Select id3frame_apic_type[j] to store the parsed data */
+		found = 0;
+		for(j = 0; id3frame_apic_type[j].type != 0xff; j++) {
 			if(type == id3frame_apic_type[j].type) {
+				found = 1;
 				break;
 			}
 		}
-		id3frame_apic_type[j].mime = mime;
-		len = strlen((char *) *p_header_buff+i);
-		id3frame_apic_type[j].descr = malloc(len + 1);
-		snprintf(id3frame_apic_type[j].descr, len + 1, (char*) *p_header_buff+i);
-		i += len + 1;
-		id3frame_apic_type[j].data = malloc(header.size - i);
-		snprintf(id3frame_apic_type[j].data, header.size - i, (char*) *p_header_buff+i);
+		if(found) {
+			id3frame_apic_type[j].mime = malloc(len + 1);
+			snprintf(id3frame_apic_type[j].mime, len + 1, (char*) *p_header_buff+i);
+			i += len + 1 + 1; /* Now skip 'type' because it is already read */
 
-//		if(strlen(descr) > 0) {
-//			printf("Descr: %s\n", descr);
-//		}
+			len = strlen((char *) *p_header_buff+i);
+			id3frame_apic_type[j].descr = malloc(len + 1);
+			snprintf(id3frame_apic_type[j].descr, len + 1, (char*) *p_header_buff+i);
+			i += len + 1;
 
-		// Print image into file
-		/*FILE *f_image;
-
-		char * filename = malloc(50);
-		snprintf(filename, 50, "%s.%s", (char *) id3frame_apic_type[j].text, subtype);
-		f_image = fopen(filename, "wb");
-		printf("Writing file %s\n", filename);
-		for(j = 0; j < header.size - i; j++) {
-			fwrite(*p_header_buff+i+j, 1 , 1, f_image);
-			if(header.flags & FLAG_FR_UNSYNC) { // if unsynchronization occurs
-				if((*(*p_header_buff+i+j) == 0xff) && (*(*p_header_buff+i+j+1) == 0x00)) {
-					j++;
-				}
-			}
+			len = header.size - i;
+			id3frame_apic_type[j].data = malloc(len);
+			memset(id3frame_apic_type[j].data, 0, len);
+			memcpy(id3frame_apic_type[j].data, *p_header_buff+i, len);
+			id3frame_apic_type[j].len = len;
+			id3frame_apic_type[j].flags = header.flags;
 		}
-		fclose(f_image);*/
-		//free(filename);
 	}
 #ifdef DEBUG
 	else {
@@ -516,7 +463,7 @@ int parse_id3v2_frame_body(unsigned char **p_header_buff, id3v2_frame_header_t h
 	}
 #endif
 
-	// Move pointer to the next frame header
+	/* Move pointer to the beginning of the next frame header */
 	*p_header_buff += header.size;
 
 	return 0;
@@ -561,6 +508,135 @@ void print_id3v2_frame_header(id3v2_frame_header_t header) {
 		printf("\t\tData length indicator: %i,\n", (header.flags & FLAG_FR_LEN) != 0);
 	}
 }
+
+
+int write_parsed_data(char * orig_name) {
+	uint32_t i;
+	uint32_t j;
+	uint16_t len;
+	FILE *p_file;
+	FILE *p_file_image;
+	char *filename;
+	char *filename_image;
+	char *extension;
+
+	/* Write textual information from ID3 tag */
+	len = strlen(orig_name) + strlen(".tag.txt") + 1;
+	filename = malloc(len);
+	snprintf(filename, len, "%s%s", orig_name, ".tag.txt");
+
+	p_file = fopen(filename, "wb");
+	if(p_file == NULL) {
+		fprintf(stderr, "Error while opening file %s to write!\n", filename);
+		return 1;
+	}
+
+	fprintf(p_file, "Textual information parsed from file %s:\n", orig_name);
+	if(ferror (p_file)) {
+		fprintf(stderr, "Error while writing into file %s!\n", filename);
+		fclose(p_file);
+		return 1;
+	}
+	for(i=0; id3v2_textinfo[i].id; i++) {
+		if(id3v2_textinfo[i].text){
+			fprintf(p_file, "\t%s %s\n", id3v2_textinfo[i].info, id3v2_textinfo[i].text);
+			if(ferror (p_file)) {
+				fprintf(stderr, "Error while writing into file %s!\n", filename);
+				fclose(p_file);
+				return 1;
+			}
+		}
+	}
+
+	for(i=0; id3frame_apic_type[i].type != 0xff; i++) {
+		/* Write picture information from ID3 tag */
+		if(id3frame_apic_type[i].data){
+			len = sizeof(id3frame_apic_type[i].mime);
+			extension = malloc(len);
+			memset(extension, 0, len);
+			sscanf(id3frame_apic_type[i].mime, "%*[^/],%s", extension);
+
+			len = sizeof(orig_name) + sizeof(id3frame_apic_type[i].text) + sizeof(extension) + 3;
+			filename_image = malloc(len);
+			snprintf(filename_image, len, "%s.%s.%s", orig_name, id3frame_apic_type[i].text, extension);
+
+			p_file_image = fopen(filename_image, "wb");
+			unsigned char *p_data = id3frame_apic_type[i].data;
+			for(j = 0; j < id3frame_apic_type[i].len; j++) {
+				fwrite(p_data+j, 1 , 1, p_file_image);
+				if(id3frame_apic_type[i].flags & FLAG_FR_UNSYNC) { // if unsynchronization occurs
+					if((*(p_data+j) == 0xff) && (*(p_data+j+1) == 0x00)) {
+						j++;
+					}
+				}
+			}
+			fclose(p_file_image);
+
+
+			fprintf(p_file, "Picture:\n\t%s\n", id3frame_apic_type[i].mime);
+			if(id3frame_apic_type[i].descr) {
+				fprintf(p_file, "\tdescription: %s\n", id3frame_apic_type[i].descr);
+			}
+			fprintf(p_file, "\tpicture is stored in file %s\n", filename_image);
+
+			free(extension);
+			free(filename_image);
+		}
+	}
+
+	if(id3v2_lyrics.text) {
+		fprintf(p_file, "Lyrics:\n\tLanguage: %s\n%s\n", id3v2_lyrics.lang, id3v2_lyrics.text);
+	}
+	if(ferror (p_file)) {
+		fprintf(stderr, "Error while writing into file %s!\n", filename);
+		fclose(p_file);
+		return 1;
+	}
+
+	printf("\nParsed ID3 tag textual frames written into file %s\n", filename);
+	fclose(p_file);
+	free(filename);
+
+	return 0;
+}
+
+
+void deallocate_memory(unsigned char *buffer) {
+	uint16_t i;
+
+	/* Free memory for buffer of input MP3 file */
+	free(buffer);
+
+	/* Free memory for each id3v2_textinfo.text */
+	for(i=0; id3v2_textinfo[i].id; i++) {
+		if(id3v2_textinfo[i].text){
+			free(id3v2_textinfo[i].text);
+		}
+	}
+	printf("\n");
+
+	/* Free memory for id3v2_lyrics items */
+	if(id3v2_lyrics.descr) {
+		free(id3v2_lyrics.descr);
+	}
+	if(id3v2_lyrics.text) {
+		free(id3v2_lyrics.text);
+	}
+
+	/* Free memory for id3frame_apic_type items */
+	for(i=0; id3frame_apic_type[i].type != 0xff; i++) {
+		if(id3frame_apic_type[i].mime){
+			free(id3frame_apic_type[i].mime);
+		}
+		if(id3frame_apic_type[i].descr){
+			free(id3frame_apic_type[i].descr);
+		}
+		if(id3frame_apic_type[i].data){
+			free(id3frame_apic_type[i].data);
+		}
+	}
+}
+
 
 
 

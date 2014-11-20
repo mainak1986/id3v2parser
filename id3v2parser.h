@@ -31,11 +31,23 @@
 #ifndef ID3V2PARSER_H_
 #define ID3V2PARSER_H_
 
-#define HEADER_LEN 10
-#define ENC_ISO_8859_1 0x00
-#define ENC_UTF_8 0x03
+/** Specification as taken from http://id3.org/id3v2.4.0-structure
 
-/*
+ * Overall tag structure:
+     +-----------------------------+
+     |      Header (10 bytes)      |
+     +-----------------------------+
+     |       Extended Header       |
+     | (variable length, OPTIONAL) |
+     +-----------------------------+
+     |   Frames (variable length)  |
+     +-----------------------------+
+     |           Padding           |
+     | (variable length, OPTIONAL) |
+     +-----------------------------+
+     | Footer (10 bytes, OPTIONAL) |
+     +-----------------------------+
+
  * ID3v2 header
 
    The first part of the ID3v2 tag is the 10 byte tag header, laid out
@@ -74,50 +86,8 @@
      $49 44 33 yy yy xx zz zz zz zz
    Where yy is less than $FF, xx is the 'flags' byte and zz is less than
    $80.
- */
-typedef struct id3v2_header_s {
-	unsigned char id[4];
-	uint8_t major_version;
-	uint8_t revision_num;
-	uint8_t flags;
-	uint32_t size;
-} id3v2_header_t;
-
-/* Flags in ID3 tag header */
-/*
-   a - Unsynchronisation
-     Bit 7 in the 'ID3v2 flags' indicates whether or not
-     unsynchronisation is applied on all frames (see section 6.1 for
-     details); a set bit indicates usage.
- */
-#define FLAG_ID3_UNSYNC 0x80
-
-/*
-   b - Extended header
-     The second bit (bit 6) indicates whether or not the header is
-     followed by an extended header. The extended header is described in
-     section 3.2. A set bit indicates the presence of an extended
-     header.
- */
-#define FLAG_ID3_EXTEND 0x40
-
-/*
-   c - Experimental indicator
-     The third bit (bit 5) is used as an 'experimental indicator'. This
-     flag SHALL always be set when the tag is in an experimental stage.
- */
-#define FLAG_ID3_EXPER 0x20
-
-/*
-   d - Footer present
-     Bit 4 indicates that a footer (section 3.4) is present at the very
-     end of the tag. A set bit indicates the presence of a footer.
- */
-#define FLAG_ID3_FOOTER 0x10
 
 
-
-/*
  * Extended header (not used in this parser)
 
    The extended header contains information that can provide further
@@ -148,10 +118,8 @@ typedef struct id3v2_header_s {
    value between 0 and 128 ($00 - $7f), followed by data that has the
    field length indicated by the length byte. If a flag has no attached
    data, the value $00 is used as length byte.
- */
 
 
-/*
  * ID3v2 frame header
 
    All ID3v2 frames consists of one frame header followed by one or more
@@ -234,7 +202,7 @@ typedef struct id3v2_header_s {
    is reflected by the revision number in the header of the tag.
 
 
-   Frame header flags
+ * Frame header flags
 
    In the frame header the size descriptor is followed by two flag
    bytes. All unused flags MUST be cleared. The first byte is for
@@ -259,60 +227,66 @@ typedef struct id3v2_header_s {
    The default status flags setting for a frame is, unless stated
    otherwise, 'preserved if tag is altered' and 'preserved if file is
    altered', i.e. %00000000.
- */
-typedef struct id3v2_frame_header_s {
-	unsigned char id[5];
-	uint32_t size;
-	uint16_t flags;
-} id3v2_frame_header_t;
 
-/* Flags in ID3 tag frame header */
-/*
+ * Frame status flags
+
    a - Tag alter preservation
+
      This flag tells the tag parser what to do with this frame if it is
      unknown and the tag is altered in any way. This applies to all
      kinds of alterations, including adding more padding and reordering
      the frames.
- */
-#define FLAG_FR_TAG 0x4000
 
-/*
+     0     Frame should be preserved.
+     1     Frame should be discarded.
+
+
    b - File alter preservation
+
      This flag tells the tag parser what to do with this frame if it is
      unknown and the file, excluding the tag, is altered. This does not
      apply when the audio is completely replaced with other audio data.
- */
-#define FLAG_FR_FILE 0x2000
 
-/*
+     0     Frame should be preserved.
+     1     Frame should be discarded.
+
+
    c - Read only
+
       This flag, if set, tells the software that the contents of this
       frame are intended to be read only. Changing the contents might
       break something, e.g. a signature. If the contents are changed,
       without knowledge of why the frame was flagged read only and
       without taking the proper means to compensate, e.g. recalculating
       the signature, the bit MUST be cleared.
- */
-#define FLAG_FR_READ 0x1000
 
-/*
+
+ * Frame format flags
+
    h - Grouping identity
+
       This flag indicates whether or not this frame belongs in a group
       with other frames. If set, a group identifier byte is added to the
       frame. Every frame with the same group identifier belongs to the
       same group.
- */
-#define FLAG_FR_GROUP 0x0040
 
-/*
+      0     Frame does not contain group information
+      1     Frame contains group information
+
+
    k - Compression
+
       This flag indicates whether or not the frame is compressed.
       A 'Data Length Indicator' byte MUST be included in the frame.
- */
-#define FLAG_FR_COMP 0x0008
 
-/*
+      0     Frame is not compressed.
+      1     Frame is compressed using zlib [zlib] deflate method.
+            If set, this requires the 'Data Length Indicator' bit
+            to be set as well.
+
+
    m - Encryption
+
       This flag indicates whether or not the frame is encrypted. If set,
       one byte indicating with which method it was encrypted will be
       added to the frame. See description of the ENCR frame for more
@@ -320,60 +294,171 @@ typedef struct id3v2_frame_header_s {
       should be done after compression. Whether or not setting this flag
       requires the presence of a 'Data Length Indicator' depends on the
       specific algorithm used.
- */
-#define FLAG_FR_ENCR 0x0004
 
-/*
+      0     Frame is not encrypted.
+      1     Frame is encrypted.
+
    n - Unsynchronisation
+
       This flag indicates whether or not unsynchronisation was applied
       to this frame. See section 6 for details on unsynchronisation.
       If this flag is set all data from the end of this header to the
       end of this frame has been unsynchronised. Although desirable, the
       presence of a 'Data Length Indicator' is not made mandatory by
       unsynchronisation.
+
       0     Frame has not been unsynchronised.
       1     Frame has been unsyrchronised.
- */
-#define FLAG_FR_UNSYNC 0x0002
 
-/*
    p - Data length indicator
+
       This flag indicates that a data length indicator has been added to
       the frame. The data length indicator is the value one would write
       as the 'Frame length' if all of the frame format flags were
       zeroed, represented as a 32 bit synchsafe integer.
+
       0      There is no Data Length Indicator.
       1      A data length Indicator has been added to the frame.
  */
-#define FLAG_FR_LEN 0x0001
 
+/** Macro for header length*/
+#define HEADER_LEN 10
+
+/** Macros for encoding */
+#define ENC_ISO_8859_1 0x00
+#define ENC_UTF_8 0x03
+
+
+/** ID3 tag header structure */
+
+typedef struct id3v2_header_s {
+	unsigned char id[4]; 	/**< "ID3" */
+	uint8_t major_version;	/**< tag major version (e.g. 4 for ID3v2.4) */
+	uint8_t revision_num;	/**< tag revision number */
+	uint8_t flags;			/**< ID3 tag header flags */
+	uint32_t size;			/**< size of ID3 tag body */
+} id3v2_header_t;
+
+/** Macros for flags in ID3 tag header */
+
+/** Unsynchronisation flag */
+#define FLAG_ID3_UNSYNC 0x80
+/** Extended header flag */
+#define FLAG_ID3_EXTEND 0x40
+/** Experimental indicator flag */
+#define FLAG_ID3_EXPER 0x20
+/** Footer present flag */
+#define FLAG_ID3_FOOTER 0x10
+
+
+/** ID3 frame header structure */
+
+typedef struct id3v2_frame_header_s {
+	unsigned char id[5];	/**< frame ID code */
+	uint32_t size;			/**< size of ID3 frame body */
+	uint16_t flags;			/**< ID3 frame header flags */
+} id3v2_frame_header_t;
+
+/** Flags in ID3 tag frame header */
+
+/** Tag alter preservation flag */
+#define FLAG_FR_TAG 0x4000
+/** File alter preservation flag */
+#define FLAG_FR_FILE 0x2000
+/** Read only flag */
+#define FLAG_FR_READ 0x1000
+/** Grouping identity flag */
+#define FLAG_FR_GROUP 0x0040
+/** Compression flag*/
+#define FLAG_FR_COMP 0x0008
+/** Encryption flag */
+#define FLAG_FR_ENCR 0x0004
+/** Unsynchronisation flag */
+#define FLAG_FR_UNSYNC 0x0002
+/** Data length indicator flag */
+#define FLAG_FR_LEN 0x0001
 
 
 /**
  * Read content of the file and store it into the buffer
- * @param name		filename
- * @param p_buffer	pointer to the initialized buffer
- * @param p_len		pointer to the length of the buffer
- * @return			0 if OK, 1 if problem has occurred
+ * @param name			filename
+ * @param p_buffer		pointer to the initialized buffer
+ * @param p_len			pointer to the length of the buffer
+ * @return				0 if OK, 1 if problem has occurred
  */
 int read_file(char * name, unsigned char ** p_buffer, uint32_t * p_len);
 
+/**
+ * Parse buffer of binary file
+ * @param buffer		buffer of input MP3 file
+ * @param buffer_len 	length of buffer (input MP3 file)
+ * @return				0 if OK, 1 if problem has occurred
+ */
 int parse_buffer(unsigned char *buffer, uint32_t buffer_len);
 
+/**
+ * Parse first 10 bytes from buffer into ID3 tag header structure
+ * @param p_header_buff	pointer to the buffer of input MP3 file
+ * @param header 		pointer to the ID3 tag header structure
+ * @return				0 if OK, 1 if problem has occurred
+ */
 int parse_id3v2_header(unsigned char **p_header_buff, id3v2_header_t* header);
 
+/**
+ * Skip ID3 tag extended header because it is useless for the parsing process
+ * @param p_header_buff	pointer to the buffer of input MP3 file
+ * @return				0 if OK
+ */
 int skip_id3v2_extended_header(unsigned char **p_header_buff);
 
+/**
+ * Parse 10 bytes from buffer into ID3 frame header structure
+ * @param p_header_buff	pointer to the buffer of input MP3 file
+ * @param header 		pointer to the ID3 frame header structure
+ * @return				0 if OK, 1 if frame ID is empty
+ */
 int parse_id3v2_frame_header(unsigned char **p_header_buff, id3v2_frame_header_t* header);
 
+/**
+ * Parse ID3 frame body and store data into static structures
+ * @param p_header_buff	pointer to the buffer of input MP3 file
+ * @param header 		pointer to the ID3 frame header structure
+ * @return				0 if OK, 1 if problem has occurred
+ */
 int parse_id3v2_frame_body(unsigned char **p_header_buff, id3v2_frame_header_t header);
 
 
+/**
+ * Auxiliary function to print hex dump
+ * @param buffer		buffer of input MP3 file
+ * @param len	 		length of the buffer to read
+ */
 void print_hexa(unsigned char *buffer, size_t len);
 
+/**
+ * Print parsed info from ID3 tag header
+ * @param header 		ID3 tag header structure
+ */
 void print_id3v2_header(id3v2_header_t header);
 
+/**
+ * Print parsed info from ID3 frame header
+ * @param header 		ID3 frame header structure
+ */
 void print_id3v2_frame_header(id3v2_frame_header_t header);
+
+/**
+ * Write parsed data into file(s)
+ * @param orig_name		original filename
+ * @return				0 if OK, 1 if problem has occurred
+ */
+int write_parsed_data(char * orig_name);
+
+/**
+ * Free dynamically allocated memory, including buffer and static structures
+ * @param buffer		buffer of input MP3 file
+ */
+void deallocate_memory(unsigned char *buffer);
 
 
 #endif /* ID3V2PARSER_H_ */
