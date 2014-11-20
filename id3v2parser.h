@@ -1,10 +1,42 @@
+/*
+ * id3v2parser - program to parse ID3v2.4 tags
+ *
+ *  Copyright (c) 2014 - Martin Rabek
+ *  All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions are met:
+ *
+ *   * Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
+ *     and/or other materials provided with the distribution.
+ *   * Neither the name of the author nor the names of its contributors may be
+ *     used to endorse or promote products derived from this software without
+ *     specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
 #ifndef ID3V2PARSER_H_
 #define ID3V2PARSER_H_
 
 #define HEADER_LEN 10
+#define ENC_ISO_8859_1 0x00
+#define ENC_UTF_8 0x03
 
 /*
-   ID3v2 header
+ * ID3v2 header
 
    The first part of the ID3v2 tag is the 10 byte tag header, laid out
    as follows:
@@ -51,33 +83,33 @@ typedef struct id3v2_header_s {
 	uint32_t size;
 } id3v2_header_t;
 
+/* Flags in ID3 tag header */
 /*
    a - Unsynchronisation
-
      Bit 7 in the 'ID3v2 flags' indicates whether or not
      unsynchronisation is applied on all frames (see section 6.1 for
      details); a set bit indicates usage.
  */
 #define FLAG_ID3_UNSYNC 0x80
+
 /*
    b - Extended header
-
      The second bit (bit 6) indicates whether or not the header is
      followed by an extended header. The extended header is described in
      section 3.2. A set bit indicates the presence of an extended
      header.
  */
 #define FLAG_ID3_EXTEND 0x40
+
 /*
    c - Experimental indicator
-
      The third bit (bit 5) is used as an 'experimental indicator'. This
      flag SHALL always be set when the tag is in an experimental stage.
  */
 #define FLAG_ID3_EXPER 0x20
+
 /*
    d - Footer present
-
      Bit 4 indicates that a footer (section 3.4) is present at the very
      end of the tag. A set bit indicates the presence of a footer.
  */
@@ -86,7 +118,7 @@ typedef struct id3v2_header_s {
 
 
 /*
-3.2. Extended header
+ * Extended header (not used in this parser)
 
    The extended header contains information that can provide further
    insight in the structure of the tag, but is not vital to the correct
@@ -116,87 +148,11 @@ typedef struct id3v2_header_s {
    value between 0 and 128 ($00 - $7f), followed by data that has the
    field length indicated by the length byte. If a flag has no attached
    data, the value $00 is used as length byte.
-
-
-   b - Tag is an update
-
-     If this flag is set, the present tag is an update of a tag found
-     earlier in the present file or stream. If frames defined as unique
-     are found in the present tag, they are to override any
-     corresponding ones found in the earlier tag. This flag has no
-     corresponding data.
-
-         Flag data length      $00
-
-   c - CRC data present
-
-     If this flag is set, a CRC-32 [ISO-3309] data is included in the
-     extended header. The CRC is calculated on all the data between the
-     header and footer as indicated by the header's tag length field,
-     minus the extended header. Note that this includes the padding (if
-     there is any), but excludes the footer. The CRC-32 is stored as an
-     35 bit synchsafe integer, leaving the upper four bits always
-     zeroed.
-
-        Flag data length       $05
-        Total frame CRC    5 * %0xxxxxxx
-
-   d - Tag restrictions
-
-     For some applications it might be desired to restrict a tag in more
-     ways than imposed by the ID3v2 specification. Note that the
-     presence of these restrictions does not affect how the tag is
-     decoded, merely how it was restricted before encoding. If this flag
-     is set the tag is restricted as follows:
-
-        Flag data length       $01
-        Restrictions           %ppqrrstt
-
-     p - Tag size restrictions
-
-       00   No more than 128 frames and 1 MB total tag size.
-       01   No more than 64 frames and 128 KB total tag size.
-       10   No more than 32 frames and 40 KB total tag size.
-       11   No more than 32 frames and 4 KB total tag size.
-
-     q - Text encoding restrictions
-
-       0    No restrictions
-       1    Strings are only encoded with ISO-8859-1 [ISO-8859-1] or
-            UTF-8 [UTF-8].
-
-     r - Text fields size restrictions
-
-       00   No restrictions
-       01   No string is longer than 1024 characters.
-       10   No string is longer than 128 characters.
-       11   No string is longer than 30 characters.
-
-       Note that nothing is said about how many bytes is used to
-       represent those characters, since it is encoding dependent. If a
-       text frame consists of more than one string, the sum of the
-       strungs is restricted as stated.
-
-     s - Image encoding restrictions
-
-       0   No restrictions
-       1   Images are encoded only with PNG [PNG] or JPEG [JFIF].
-
-     t - Image size restrictions
-
-       00  No restrictions
-       01  All images are 256x256 pixels or smaller.
-       10  All images are 64x64 pixels or smaller.
-       11  All images are exactly 64x64 pixels, unless required
-           otherwise.
-
  */
-
-// TODO - frame extended header flags
 
 
 /*
-   ID3v2 frame overview
+ * ID3v2 frame header
 
    All ID3v2 frames consists of one frame header followed by one or more
    fields containing the actual information. The header is always 10
@@ -276,14 +232,8 @@ typedef struct id3v2_header_s {
    specified in this document, that indicates that additions to the
    frame have been made in a later version of the ID3v2 standard. This
    is reflected by the revision number in the header of the tag.
- */
-typedef struct id3v2_frame_header_s {
-	unsigned char id[5];
-	uint32_t size;
-	uint16_t flags;
-} id3v2_frame_header_t;
 
-/*
+
    Frame header flags
 
    In the frame header the size descriptor is followed by two flag
@@ -310,36 +260,32 @@ typedef struct id3v2_frame_header_s {
    otherwise, 'preserved if tag is altered' and 'preserved if file is
    altered', i.e. %00000000.
  */
+typedef struct id3v2_frame_header_s {
+	unsigned char id[5];
+	uint32_t size;
+	uint16_t flags;
+} id3v2_frame_header_t;
 
-
+/* Flags in ID3 tag frame header */
 /*
    a - Tag alter preservation
-
      This flag tells the tag parser what to do with this frame if it is
      unknown and the tag is altered in any way. This applies to all
      kinds of alterations, including adding more padding and reordering
      the frames.
-
-     0     Frame should be preserved.
-     1     Frame should be discarded.
  */
 #define FLAG_FR_TAG 0x4000
 
 /*
    b - File alter preservation
-
      This flag tells the tag parser what to do with this frame if it is
      unknown and the file, excluding the tag, is altered. This does not
      apply when the audio is completely replaced with other audio data.
-
-     0     Frame should be preserved.
-     1     Frame should be discarded.
  */
 #define FLAG_FR_FILE 0x2000
 
 /*
    c - Read only
-
       This flag, if set, tells the software that the contents of this
       frame are intended to be read only. Changing the contents might
       break something, e.g. a signature. If the contents are changed,
@@ -351,34 +297,22 @@ typedef struct id3v2_frame_header_s {
 
 /*
    h - Grouping identity
-
       This flag indicates whether or not this frame belongs in a group
       with other frames. If set, a group identifier byte is added to the
       frame. Every frame with the same group identifier belongs to the
       same group.
-
-      0     Frame does not contain group information
-      1     Frame contains group information
-
  */
 #define FLAG_FR_GROUP 0x0040
 
 /*
    k - Compression
-
       This flag indicates whether or not the frame is compressed.
       A 'Data Length Indicator' byte MUST be included in the frame.
-
-      0     Frame is not compressed.
-      1     Frame is compressed using zlib [zlib] deflate method.
-            If set, this requires the 'Data Length Indicator' bit
-            to be set as well.
  */
 #define FLAG_FR_COMP 0x0008
 
 /*
    m - Encryption
-
       This flag indicates whether or not the frame is encrypted. If set,
       one byte indicating with which method it was encrypted will be
       added to the frame. See description of the ENCR frame for more
@@ -386,22 +320,17 @@ typedef struct id3v2_frame_header_s {
       should be done after compression. Whether or not setting this flag
       requires the presence of a 'Data Length Indicator' depends on the
       specific algorithm used.
-
-      0     Frame is not encrypted.
-      1     Frame is encrypted.
  */
 #define FLAG_FR_ENCR 0x0004
 
 /*
    n - Unsynchronisation
-
       This flag indicates whether or not unsynchronisation was applied
       to this frame. See section 6 for details on unsynchronisation.
       If this flag is set all data from the end of this header to the
       end of this frame has been unsynchronised. Although desirable, the
       presence of a 'Data Length Indicator' is not made mandatory by
       unsynchronisation.
-
       0     Frame has not been unsynchronised.
       1     Frame has been unsyrchronised.
  */
@@ -409,23 +338,31 @@ typedef struct id3v2_frame_header_s {
 
 /*
    p - Data length indicator
-
       This flag indicates that a data length indicator has been added to
       the frame. The data length indicator is the value one would write
       as the 'Frame length' if all of the frame format flags were
       zeroed, represented as a 32 bit synchsafe integer.
-
       0      There is no Data Length Indicator.
       1      A data length Indicator has been added to the frame.
  */
 #define FLAG_FR_LEN 0x0001
 
 
-int read_file(char * name, unsigned char ** p_buffer, unsigned long * p_len);
 
-int parse_buffer(unsigned char *buffer, unsigned long buffer_len);
+/**
+ * Read content of the file and store it into the buffer
+ * @param name		filename
+ * @param p_buffer	pointer to the initialized buffer
+ * @param p_len		pointer to the length of the buffer
+ * @return			0 if OK, 1 if problem has occurred
+ */
+int read_file(char * name, unsigned char ** p_buffer, uint32_t * p_len);
+
+int parse_buffer(unsigned char *buffer, uint32_t buffer_len);
 
 int parse_id3v2_header(unsigned char **p_header_buff, id3v2_header_t* header);
+
+int skip_id3v2_extended_header(unsigned char **p_header_buff);
 
 int parse_id3v2_frame_header(unsigned char **p_header_buff, id3v2_frame_header_t* header);
 
