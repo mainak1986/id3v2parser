@@ -528,13 +528,15 @@ int write_parsed_data(char * orig_name) {
 	p_file = fopen(filename, "wb");
 	if(p_file == NULL) {
 		fprintf(stderr, "Error while opening file %s to write!\n", filename);
+		free(filename);
 		return 1;
 	}
 
 	fprintf(p_file, "Textual information parsed from file %s:\n", orig_name);
 	if(ferror (p_file)) {
 		fprintf(stderr, "Error while writing into file %s!\n", filename);
-		//fclose(p_file);
+		fclose(p_file);
+		free(filename);
 		return 1;
 	}
 	for(i=0; id3v2_textinfo[i].id; i++) {
